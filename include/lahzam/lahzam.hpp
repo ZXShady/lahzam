@@ -182,9 +182,11 @@ namespace details {
 
 } // namespace details
 
-template<template<typename...> class Tuple = lahzam::details::tuple, reflectable Object>
+template<template<typename...> class Tuple = lahzam::details::tuple, typename Object>
 constexpr decltype(auto) tie(Object& object) noexcept
 {
+  static_assert(reflectable<Object>);
+
   return details::tuple_ref_to_tuple<Tuple>(details::tie(object), std::make_index_sequence<member_count<Object>>{});
 }
 namespace details {
@@ -384,7 +386,7 @@ namespace details {
 
 
   template<typename T, std::size_t... Is>
-  constexpr auto name(std::index_sequence<Is...>) noexcept
+  consteval auto name(std::index_sequence<Is...>) noexcept
   {
     constexpr auto t = lahzam::details::tie(details::get_faker<T>());
     constexpr auto n = details::name_of<T, &details::get<Is>(t)..., &comma_man>();
@@ -392,7 +394,7 @@ namespace details {
   }
 
   // auto __cdecl lahzam::details::name_of<struct Pair,& lahzam::details::faker<struct Pair>->x,& lahzam::details::faker<struct Pair>->y,& lahzam::details::faker<struct Pair>->z>(void) noexcept
-  constexpr void parse_members(
+  consteval void parse_members(
     const char*       str,
     const std::size_t class_length,
     const bool        null_terminated,
@@ -416,13 +418,13 @@ namespace details {
   }
 
   template<typename T>
-  constexpr auto __cdecl raw_name_length() noexcept
+  consteval auto __cdecl raw_name_length() noexcept
   {
     return SZC(__FUNCSIG__) - SZC("auto __cdecl lahzam::details::raw_name_length<>(void) noexcept");
   }
 
   template<typename T>
-  constexpr Members reflection_member_names_get()
+  consteval Members reflection_member_names_get()
   {
     constexpr auto name = details::name<T>(std::make_index_sequence<lahzam::member_count<T>>());
 
@@ -651,15 +653,17 @@ namespace details {
 template<typename T>
 inline constexpr details::member_names_t<T> member_names{};
 
-template<std::size_t I, reflectable Object>
-constexpr decltype(auto) get(Object& object) noexcept
+template<std::size_t I, typename Object>
+[[nodiscard]] constexpr decltype(auto) get(Object& object) noexcept
 {
+  static_assert(reflectable<Object>);
   return details::get<I>(lahzam::details::tie(object));
 }
 
-template<details::fixed_string S, reflectable Object>
-constexpr decltype(auto) get(Object& object) noexcept
+template<details::fixed_string S, typename Object>
+[[nodiscard]] constexpr decltype(auto) get(Object& object) noexcept
 {
+  static_assert(reflectable<Object>);
   using O = std::remove_cvref_t<Object>;
   return details::get<details::name_to_index({S.str, S.str + S.size}, lahzam::member_names<O>[0].data(), lahzam::member_count<O>)>(
     lahzam::details::tie(object));
@@ -675,18 +679,22 @@ namespace details {
 
 } // namespace details
 
-template<typename F, reflectable Object>
+template<typename F, typename Object>
 constexpr decltype(auto) apply(F&& f, Object& object)
 {
+  static_assert(reflectable<Object>);
+
   return details::apply(static_cast<F&&>(f), object, std::make_index_sequence<member_count<Object>>{});
 }
 
-template<typename F, reflectable Object>
-constexpr decltype(auto) for_each_member(F f, Object& object)
+template<typename F, typename Object>
+constexpr void for_each_member(F f, Object& object)
 {
+  static_assert(reflectable<Object>);
+
   return details::apply(
     [&f](auto&... objects) {
-      const char c[] = {(f(objects), '\0')...,0};
+      const char c[] = {((void)f(objects), '\0')...,0};
       (void)c;
     },
     object,
