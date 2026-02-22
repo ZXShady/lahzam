@@ -309,7 +309,7 @@ namespace details {
 
   // auto __cdecl lahzam::details::name_of<struct Pair,& lahzam::details::faker<struct Pair>->x,& lahzam::details::faker<struct Pair>->y,& lahzam::details::faker<struct Pair>->z>(void) noexcept
   constexpr void parse_members(
-    const char*       str,
+    const char* str,
     //const std::size_t class_length,
     const std::size_t member_access_length,
     const bool        null_terminated,
@@ -323,7 +323,6 @@ namespace details {
       //std::cout << str << '\n';
       //std::cout << class_length << '\n';
       //std::cout << member_access_length << '\n';
-
       str += SZC("wrapper<") + member_access_length;
       //std::cout << str << '\n';
       if (*str != '.') {
@@ -343,6 +342,9 @@ namespace details {
       }
       //std::cout << str << '\n';
       str += SZC("::value.") + member_access_length + SZC("::");
+      while (!((*str >= 'a' && *str <= 'z') || (*str >= 'A' && *str <= 'Z') || *str == '_' || (*str >= '0' && *str <= '9'))) {
+        ++str;
+      }
       //std::cout << str << '\n';
       const auto start = buffer;
       while (*str != ',')
