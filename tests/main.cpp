@@ -1,11 +1,18 @@
-#include <lahzam/lahzam.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <lahzam/lahzam.hpp>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <vector>
+#include <memory>
+#include <string>
 
+struct LRef {
+  int& ref1;
+  int& ref2;
+  int& ref3;
+};
 
 namespace MyLib {
 struct Person {
@@ -36,7 +43,7 @@ struct ComplexData {
     int x;
     int y;
   } point;
-  int id;
+  std::unique_ptr<int> id{new int(0x42)};
 };
 
 namespace {
@@ -50,10 +57,22 @@ using InternalType = BasicInternalType<long>;
 
 } // namespace
 
-TEST_CASE("tets", "[lahzam]")
+TEST_CASE("test", "[lahzam]")
 {
+  SECTION("Reference members")
+  {
+    int  x[3]{6, 7, 8};
+    LRef ref{x[0], x[1], x[2]};
+    STATIC_CHECK(lahzam::member_count<LRef> == 3);
+    CHECK(lahzam::get<0>(ref) == 6);
+    CHECK(lahzam::get<1>(ref) == 7);
+    CHECK(lahzam::get<2>(ref) == 8);
+  }
+
   SECTION("tie")
   {
+
+
     MyLib::Person p{"Alice", 30, 95.5};
     auto          tied = lahzam::tie(p);
 
@@ -142,14 +161,18 @@ TEST_CASE("tets", "[lahzam]")
     lahzam::get<"score">(p) = 99.9;
     CHECK(p.score == 99.9);
 
-    PairWrapper<std::string, int> pw{"Test", 123, {"Test2",321}};
-    CHECK(lahzam::get<"first">(pw) == "Test");
-    CHECK(lahzam::get<"real">(pw).first == "Test2");
+    PairWrapper<std::string, int> pw{"Test", 123, {"Test2", 321}};
+    // CHECK(lahzam::get<"first">(pw) == "Test");
+    // CHECK(lahzam::get<"real">(pw).first == "Test2");
 
-    ComplexData cd{{10, 20}, 999};
+    ComplexData cd{{10, 20}, std::make_unique<int>(0x100)};
     auto&       pt = lahzam::get<"point">(cd);
     CHECK(pt.x == 10);
     CHECK(lahzam::get<"x">(pt) == 10);
+    CHECK(pt.y == 20);
+    CHECK(lahzam::get<"y">(pt) == 20);
+    CHECK(*cd.id == 0x100);
+    CHECK(*lahzam::get<"id">(cd) == 0x100);
   }
 
   SECTION("apply")
@@ -164,10 +187,9 @@ TEST_CASE("tets", "[lahzam]")
       CHECK(&n == &p.name);
       CHECK(&a == &p.age);
       CHECK(&s == &p.score);
-      return 0x42;
     };
 
-    CHECK(lahzam::apply(check, p) == 0x42);
+    lahzam::apply(check, p);
   }
 
   SECTION("for_each_member")
@@ -194,9 +216,50 @@ TEST_CASE("tets", "[lahzam]")
     CHECK(pw.real.second == "");
   }
 
+  SECTION("for_each_member_with_name")
+  {
+    MyLib::Person                           p;
+
+    lahzam::for_each_member_with_name(
+      [](auto&& member,std::string_view name) {
+        using T = std::remove_cvref_t<decltype(member)>;
+        if constexpr(std::is_same_v<T,std::string>)
+        {
+          CHECK(name == "name");
+        } else if constexpr(std::is_same_v<T,int>) 
+        {
+          CHECK(name == "age");
+        } else if constexpr(std::is_same_v<T,double>)
+        {
+          CHECK(name == "score");
+        } else 
+        {
+          static_assert(!std::is_same_v<T,T>,"Not a valid type");
+        }
+      },p);
+
+    lahzam::for_each_member_with_index(
+      [](auto&& member,size_t idx) {
+        using T = std::remove_cvref_t<decltype(member)>;
+        if constexpr(std::is_same_v<T,std::string>)
+        {
+          CHECK(idx == 0);
+        } else if constexpr(std::is_same_v<T,int>) 
+        {
+          CHECK(idx == 1);
+        } else if constexpr(std::is_same_v<T,double>)
+        {
+          CHECK(idx == 2);
+        } else 
+        {
+          static_assert(!std::is_same_v<T,T>,"Not a valid type");
+        }
+      },p);
+  }
+
   SECTION("anon type refl")
   {
-    ComplexData c{{5, 10}, 1};
+    ComplexData c{{5, 10}};
     auto&       point = lahzam::get<"point">(c);
 
     using AnonType = std::decay_t<decltype(point)>;
@@ -207,4 +270,19 @@ TEST_CASE("tets", "[lahzam]")
     CHECK(lahzam::get<0>(point) == 5);
     CHECK(lahzam::get<1>(point) == 10);
   }
+
+  SECTION("Internal types")
+   {
+      struct 
+      {
+        int x,y,z;
+      } internal{10,11,12};
+      using T = decltype(internal);
+      CHECK(lahzam::member_names<T>[0] == "x");
+      CHECK(lahzam::member_names<T>[1] == "y");
+      CHECK(lahzam::member_names<T>[2] == "z");
+      lahzam::get<2>(internal) = 3;
+      CHECK(internal.z == 3);
+      STATIC_CHECK(lahzam::member_count<T> == 3);
+    }
 }

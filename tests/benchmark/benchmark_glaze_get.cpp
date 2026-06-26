@@ -29,7 +29,7 @@ int test(std::index_sequence<Is...>)
   T  t{};
   auto tuple = glz::to_tie(t);
   using ::std::get;
-  int c[] = {(get<Is>(tuple), 0)...};
+  int c[] = {((void)get<Is>(tuple), char())...};
   (void)c;
   return 0;
 }

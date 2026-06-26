@@ -27,7 +27,7 @@ template<typename T, std::size_t... Is>
 int test(std::index_sequence<Is...>)
 {
   T  t{};
-  int c[] = {(glz::reflect<T>::keys[Is], 0)...};
+  int c[] = {((void)glz::reflect<T>::keys[Is], char())...};
   (void)c;
   return 0;
 }

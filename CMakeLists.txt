@@ -21,7 +21,7 @@ target_include_directories(lahzam INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-option(LAHZAM_BUILD_TESTS "Enable tests for this `lahzam` library" OFF)
+option(LAHZAM_BUILD_TESTS "Enable tests" OFF)
 
 if(LAHZAM_BUILD_TESTS)
   enable_testing()

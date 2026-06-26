@@ -23,6 +23,7 @@ namespace details {
 #if defined(__clang__)
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wundefined-var-template"
+  #pragma clang diagnostic ignored "-Wundefined-internal"
 #endif
 
 namespace lahzam {
@@ -41,13 +42,9 @@ namespace details {
   template<std::size_t... Is, typename... Ts>
   struct tuple_ref_impl<std::index_sequence<Is...>, Ts...> : public tuple_leaf<Is, Ts>... {
     template<typename... Us>
-    constexpr tuple_ref_impl(Us&... us) noexcept : tuple_leaf<Is, Ts>(us)...
+    constexpr tuple_ref_impl(Us&... us) noexcept : tuple_leaf<Is, Ts>{us}...
     {
     }
-    constexpr tuple_ref_impl(const tuple_ref_impl&)            = default;
-    constexpr tuple_ref_impl(tuple_ref_impl&&)                 = default;
-    constexpr tuple_ref_impl& operator=(const tuple_ref_impl&) = default;
-    constexpr tuple_ref_impl& operator=(tuple_ref_impl&&)      = default;
   };
 
   template<std::size_t I, typename T>
@@ -66,36 +63,58 @@ namespace details {
   template<typename... Ts>
   using tuple_ref_t = tuple_ref_impl<std::make_index_sequence<sizeof...(Ts)>, Ts...>;
 
-  template<typename... Ts >
-  struct tuple_ref : tuple_ref_t<Ts...> { using tuple_ref_t<Ts...>::tuple_ref_t;};
-  
-  template<typename ... Ts>
+  template<typename... Ts>
+  struct tuple_ref : tuple_ref_t<Ts...> {
+    using tuple_ref_t<Ts...>::tuple_ref_t;
+  };
+
+  template<typename... Ts>
   tuple_ref(Ts&...) -> tuple_ref<Ts&...>;
 
-  template<typename T>
-  concept reflectable = std::is_aggregate_v<T>;
 
 } // namespace details
 
-template<typename T>
-concept reflectable = details::reflectable<std::remove_cvref_t<T>>;
-
 namespace details {
+  #ifndef __cpp_concepts
+  template<typename T>
+  using rem_cvref = std::remove_cv_t<std::remove_reference_t<T>>;
+  #endif
+  template<typename C>
   struct any {
     any();
     any(std::size_t);
+
+#ifdef __cpp_concepts 
     template<typename T>
+      requires(!std::is_same_v<std::remove_cvref_t<T>, C> && std::is_copy_constructible_v<std::remove_cvref_t<T>>)
     operator T&() const;
     template<typename T>
+      requires(!std::is_same_v<std::remove_cvref_t<T>, C> && std::is_move_constructible_v<std::remove_cvref_t<T>>)
     operator T&&() const;
+#else
+    template<typename T,std::enable_if_t<!std::is_same_v<rem_cvref<T>, C> && std::is_copy_constructible_v<rem_cvref<T>>,int> = 0>
+    operator T&() const;
+    template<typename T,std::enable_if_t<!std::is_same_v<rem_cvref<T>, C> && std::is_move_constructible_v<rem_cvref<T>>,int> = 0>
+    operator T&&() const;
+#endif
   };
 
+#ifdef __cpp_concepts
   template<typename, typename>
   bool is_constructible_with;
+  template<typename T, std::size_t... Is>
+  inline constexpr bool is_constructible_with<T, std::index_sequence<Is...>> = requires { T{any<T>{Is}...}; };
+#else
+  template<typename, typename,typename = void>
+  bool is_constructible_with;
+
+  template<typename T, std::size_t... Is,typename AlwaysVoid>
+  inline constexpr bool is_constructible_with<T, std::index_sequence<Is...>,AlwaysVoid> = false;
 
   template<typename T, std::size_t... Is>
-  inline constexpr bool is_constructible_with<T, std::index_sequence<Is...>> = requires { T{any{Is}...}; };
+  inline constexpr bool is_constructible_with<T, std::index_sequence<Is...>,decltype(void(T{any<T>{Is}...}))> = true;
 
+#endif
 
   template<typename T, std::size_t I, std::size_t... Is>
   constexpr std::size_t classic() noexcept
@@ -111,7 +130,7 @@ namespace details {
   template<typename T, std::size_t I>
   constexpr std::size_t classic() noexcept
   {
-    if constexpr (requires { T{any{}}; }) {
+    if constexpr (is_constructible_with<T,std::index_sequence<0>>) {
       return 1;
     }
     else {
@@ -136,22 +155,31 @@ namespace details {
     }
   }
 
-
-  template<typename T>
-  constexpr auto member_count = []<std::size_t... Is>(std::index_sequence<Is...>) {
-    return std::is_empty_v<T> ? 0 : details::classic<T, Is...>();
-  }(std::make_index_sequence<256>{});
-
-  template<typename T>
-    requires std::default_initializable<T>
-  constexpr auto member_count<T> = std::is_empty_v<T> ? 0 : details::bin_search<T, 0, 256>();
+  template<typename T,std::size_t... Is>
+  constexpr std::size_t member_count_impl(std::index_sequence<Is...>) {
+    if constexpr (std::is_empty_v<T>) {
+      return 0;
+    }
+    else if constexpr (std::is_array_v<T> || std::is_fundamental_v<T> || !std::is_aggregate_v<T>) {
+      return std::size_t(-1);
+    }
+    else if constexpr (std::is_default_constructible_v<T>) {
+      const auto c = details::bin_search<T, 0,sizeof(T) >= 256 ? 256 : sizeof(T)>();
+      return c == 0 ? std::size_t(-1) : c;
+    }
+    else {
+      const auto c = details::classic<T, Is...>();
+      return c == 0 ? std::size_t(-1) : c;
+    }
+  };
 
 }; // namespace details
 
 
-template<reflectable T>
-constexpr std::size_t member_count = details::member_count<std::remove_cvref_t<T>>;
-
+template<typename T>
+constexpr std::size_t member_count = details::member_count_impl<std::remove_cv_t<std::remove_reference_t<T>>>(std::make_index_sequence<256>{});
+template<typename T>
+constexpr bool is_reflectable = member_count<T> != size_t(-1);
 
 namespace details {
 
@@ -185,7 +213,7 @@ namespace details {
 template<template<typename...> class Tuple = lahzam::details::tuple, typename Object>
 constexpr decltype(auto) tie(Object& object) noexcept
 {
-  static_assert(reflectable<Object>);
+  static_assert(is_reflectable<Object>);
 
   return details::tuple_ref_to_tuple<Tuple>(details::tie(object), std::make_index_sequence<member_count<Object>>{});
 }
@@ -198,7 +226,12 @@ namespace details {
   };
 
   template<typename T>
-  consteval const T& get_faker() noexcept
+  #ifdef __cpp_consteval
+  consteval
+  #else
+  constexpr 
+  #endif 
+  const T& get_faker() noexcept
   {
     return wrapper<T>::faker.value;
   }
@@ -272,13 +305,13 @@ namespace details {
   }
 
 
-//  // IMPORTANT THIS IS VARIAIDC
-//  template<typename... T>
-//  constexpr auto raw_name_length_long() noexcept
-//  {
-//    std::cout << "RAWNAME LONG" << __PRETTY_FUNCTION__ << '\n';
-//    return SZC(__PRETTY_FUNCTION__) - SZC("constexpr auto lahzam::details::raw_name_length_long() [with T = {]");
-//  }
+  //  // IMPORTANT THIS IS VARIAIDC
+  //  template<typename... T>
+  //  constexpr auto raw_name_length_long() noexcept
+  //  {
+  //    std::cout << "RAWNAME LONG" << __PRETTY_FUNCTION__ << '\n';
+  //    return SZC(__PRETTY_FUNCTION__) - SZC("constexpr auto lahzam::details::raw_name_length_long() [with T = {]");
+  //  }
 
   template<auto&... V>
   constexpr auto name_of() noexcept
@@ -456,7 +489,7 @@ namespace details {
   template<typename T>
   constexpr auto reflection_member_names_storage_indices = []() {
     constexpr Members members = details::reflection_member_names_get<T>();
-    constexpr auto    Count   = member_count<T>;
+    constexpr auto    Count   = lahzam::member_count<T>;
     using Length              = std::conditional_t<(members.total_length <= UINT8_MAX), std::uint8_t, std::uint16_t>;
     std::array<Length, Count + 1> ret{};
     Length                        string_index = 0;
@@ -468,160 +501,204 @@ namespace details {
     return ret;
   }();
 
-
-  struct senitiel {};
-
-  template<typename CRTP, std::ptrdiff_t Size>
-  struct sized_iterator {
-    static_assert(Size < INT16_MAX, "Too many enum entries");
-  private:
-    using IndexType = std::conditional_t<(Size <= INT8_MAX), std::int8_t, std::int16_t>;
-  public:
-    IndexType       index{};
-    constexpr CRTP& operator+=(const std::ptrdiff_t offset) & noexcept
-    {
-      index += static_cast<IndexType>(offset);
-      return static_cast<CRTP&>(*this);
-    }
-    constexpr CRTP& operator-=(const std::ptrdiff_t offset) & noexcept
-    {
-      index -= static_cast<IndexType>(offset);
-      return static_cast<CRTP&>(*this);
-    }
-
-    constexpr CRTP& operator++() & noexcept
-    {
-      ++index;
-      return static_cast<CRTP&>(*this);
-    }
-    constexpr CRTP& operator--() & noexcept
-    {
-      --index;
-      return static_cast<CRTP&>(*this);
-    }
-
-    [[nodiscard]] constexpr CRTP operator++(int) & noexcept
-    {
-      auto copy = static_cast<CRTP&>(*this);
-      ++*this;
-      return copy;
-    }
-    [[nodiscard]] constexpr CRTP operator--(int) & noexcept
-    {
-      auto copy = static_cast<CRTP&>(*this);
-      --*this;
-      return copy;
-    }
-
-    [[nodiscard]] constexpr friend CRTP operator+(CRTP it, const std::ptrdiff_t offset) noexcept
-    {
-      it += offset;
-      return it;
-    }
-
-    [[nodiscard]] constexpr friend CRTP operator+(const std::ptrdiff_t offset, CRTP it) noexcept
-    {
-      it += offset;
-      return it;
-    }
-
-    [[nodiscard]] constexpr friend CRTP operator-(CRTP it, const std::ptrdiff_t offset) noexcept
-    {
-      it -= offset;
-      return it;
-    }
-
-    [[nodiscard]] constexpr std::ptrdiff_t operator-(const sized_iterator that) const noexcept
-    {
-      return index - that.index;
-    }
-
-    [[nodiscard]] constexpr std::ptrdiff_t        operator-(senitiel) const noexcept { return index - Size; }
-    [[nodiscard]] friend constexpr std::ptrdiff_t operator-(senitiel, sized_iterator it) noexcept
-    {
-      return Size - it.index;
-    }
-
-    [[nodiscard]] constexpr bool operator==(const sized_iterator that) const noexcept { return that.index == index; };
-    [[nodiscard]] constexpr bool operator==(senitiel) const noexcept { return Size == index; }
-
-#ifdef __cpp_impl_three_way_comparison
-    [[nodiscard]] constexpr auto operator<=>(const sized_iterator that) const noexcept { return index <=> that.index; };
-    [[nodiscard]] constexpr auto operator<=>(senitiel) const noexcept { return index <=> Size; }
-#else
-
-    [[nodiscard]] constexpr bool operator!=(const sized_iterator that) const noexcept { return that.index != index; };
-    [[nodiscard]] constexpr bool operator!=(senitiel) const noexcept { return Size != index; }
-
-    [[nodiscard]] friend constexpr bool operator==(senitiel, const sized_iterator it) noexcept
-    {
-      return Size == it.index;
-    }
-
-
-    [[nodiscard]] friend constexpr bool operator!=(senitiel, const sized_iterator it) noexcept
-    {
-      return Size != it.index;
-    }
-
-
-    [[nodiscard]] constexpr bool operator<(const sized_iterator that) const noexcept { return index < that.index; };
-    [[nodiscard]] constexpr bool operator>(const sized_iterator that) const noexcept { return index > that.index; };
-    [[nodiscard]] constexpr bool operator<=(const sized_iterator that) const noexcept { return index <= that.index; };
-    [[nodiscard]] constexpr bool operator>=(const sized_iterator that) const noexcept { return index >= that.index; };
-
-    [[nodiscard]] constexpr bool operator<(senitiel) const noexcept { return index < Size; };
-    [[nodiscard]] constexpr bool operator>(senitiel) const noexcept { return index > Size; };
-    [[nodiscard]] constexpr bool operator<=(senitiel) const noexcept { return index <= Size; };
-    [[nodiscard]] constexpr bool operator>=(senitiel) const noexcept { return index >= Size; };
-
-    [[nodiscard]] friend constexpr bool operator<(senitiel, const sized_iterator it) noexcept
-    {
-      return Size < it.index;
-    };
-    [[nodiscard]] friend constexpr bool operator>(senitiel, const sized_iterator it) noexcept
-    {
-      return Size > it.index;
-    };
-    [[nodiscard]] friend constexpr bool operator<=(senitiel, const sized_iterator it) noexcept
-    {
-      return Size <= it.index;
-    };
-    [[nodiscard]] friend constexpr bool operator>=(senitiel, const sized_iterator it) noexcept
-    {
-      return Size >= it.index;
-    };
-
-#endif
-  };
-
   template<typename T, typename String = std::string_view>
   struct member_names_t {
-    [[nodiscard]] static constexpr std::size_t size() noexcept { return member_count<T>; }
+    using value_type = String;
+    [[nodiscard]] static constexpr std::size_t size() noexcept { return lahzam::member_count<T>; }
 
-    struct iterator : sized_iterator<iterator, static_cast<std::ptrdiff_t>(size())> {
+    struct iterator {
+    public:
+      using IndexType = std::int16_t;
       using value_type = String;
+      IndexType index{};
+      constexpr iterator& operator+=(const std::ptrdiff_t offset) & noexcept
+      {
+        index += static_cast<IndexType>(offset);
+        return *this;
+      }
+      constexpr iterator& operator-=(const std::ptrdiff_t offset) & noexcept
+      {
+        index -= static_cast<IndexType>(offset);
+        return *this;
+      }
+
+      constexpr iterator& operator++() & noexcept
+      {
+        ++index;
+        return *this;
+      }
+      constexpr iterator& operator--() & noexcept
+      {
+        --index;
+        return *this;
+      }
+
+      [[nodiscard]] constexpr iterator operator++(int) & noexcept
+      {
+        auto copy = *this;
+        ++index;
+        return copy;
+      }
+      [[nodiscard]] constexpr iterator operator--(int) & noexcept
+      {
+        auto copy = *this;
+        --index;
+        return copy;
+      }
+
+      [[nodiscard]] constexpr friend iterator operator+(iterator it, const std::ptrdiff_t offset) noexcept
+      {
+        it += offset;
+        return it;
+      }
+
+      [[nodiscard]] constexpr friend iterator operator+(const std::ptrdiff_t offset, iterator it) noexcept
+      {
+        it += offset;
+        return it;
+      }
+
+      [[nodiscard]] constexpr friend iterator operator-(iterator it, const std::ptrdiff_t offset) noexcept
+      {
+        it -= offset;
+        return it;
+      }
+
+      [[nodiscard]] constexpr std::ptrdiff_t operator-(const iterator that) const noexcept
+      {
+        return index - that.index;
+      }
+
+      [[nodiscard]] constexpr bool operator==(const iterator that) const noexcept { return that.index == index; };
+
+#ifdef __cpp_impl_three_way_comparison
+      [[nodiscard]] constexpr auto operator<=>(const iterator that) const noexcept { return index <=> that.index; };
+#else
+
+      [[nodiscard]] constexpr bool operator!=(const iterator that) const noexcept { return that.index != index; };
+      [[nodiscard]] constexpr bool operator<(const iterator that) const noexcept { return index < that.index; };
+      [[nodiscard]] constexpr bool operator>(const iterator that) const noexcept { return index > that.index; };
+      [[nodiscard]] constexpr bool operator<=(const iterator that) const noexcept { return index <= that.index; };
+      [[nodiscard]] constexpr bool operator>=(const iterator that) const noexcept { return index >= that.index; };
+
+#endif
       [[nodiscard]] constexpr String operator*() const noexcept
       {
         const auto* const strings = details::reflection_member_names_storage<T>.data();
         const auto* const p       = details::reflection_member_names_storage_indices<T>.data();
-        return String(strings + p[this->index], p[this->index + 1] - p[this->index] - 1 /*Nullterminated*/);
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
+return String(strings + p[this->index], p[this->index + 1] - p[this->index] - 1 /*Nullterminated*/);
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
       }
 
       [[nodiscard]] constexpr String operator[](const std::ptrdiff_t i) const noexcept { return *(*this + i); }
     };
 
     [[nodiscard]] static constexpr auto begin() { return iterator{}; }
-    [[nodiscard]] static constexpr auto end() { return senitiel{}; }
+    [[nodiscard]] static constexpr auto end()
+    {
+      return iterator{static_cast<typename iterator::IndexType>(lahzam::member_count<T>)};
+    }
 
     [[nodiscard]] constexpr auto operator[](const std::size_t i) const noexcept
     {
       return *(begin() + static_cast<std::ptrdiff_t>(i));
     }
   };
+} // namespace details
 
 
-  template<std::size_t N>
+template<typename T>
+inline constexpr details::member_names_t<std::remove_cv_t<std::remove_reference_t<T>>> member_names{};
+
+template<std::size_t I, typename Object>
+[[nodiscard]] constexpr decltype(auto) get(Object& object) noexcept
+{
+  static_assert(is_reflectable<Object>);
+  return details::get<I>(lahzam::details::tie(object));
+}
+
+namespace details {
+  template<typename F, typename Object, std::size_t... Is>
+  constexpr decltype(auto) apply(F&& f, Object& object, std::index_sequence<Is...>)
+  {
+    auto t = details::tie(object);
+    return static_cast<F&&>(f)(details::get<Is>(t)...);
+  }
+
+} // namespace details
+
+template<typename F, typename Object>
+constexpr decltype(auto) apply(F&& f, Object& object)
+{
+  static_assert(is_reflectable<Object>);
+
+  return details::apply(static_cast<F&&>(f), object, std::make_index_sequence<member_count<Object>>{});
+}
+
+template<typename F, typename Object>
+constexpr void for_each_member(F f, Object& object)
+{
+  static_assert(is_reflectable<Object>);
+
+  return details::apply(
+    [&f](auto&... objects) {
+      const char c[] = {((void)f(objects), '\0')..., 0};
+      (void)c;
+    },
+    object,
+    std::make_index_sequence<member_count<Object>>{});
+}
+
+template<typename F, typename Object>
+constexpr void for_each_member_with_name(F f, Object& object)
+{
+  static_assert(is_reflectable<Object>);
+
+  std::size_t i = 0;
+  return details::apply(
+    [&f, &i](auto&... objects) {
+      const char c[] = {((void)f(objects, member_names<Object>[i++]), '\0')..., char()};
+      (void)c;
+    },
+    object,
+    std::make_index_sequence<member_count<Object>>{});
+}
+
+
+template<typename F, typename Object>
+constexpr void for_each_member_with_index(F f, Object& object)
+{
+  static_assert(is_reflectable<Object>);
+
+  std::size_t i = 0;
+  return details::apply(
+    [&f, &i](auto&... objects) {
+      const char c[] = {((void)f(objects, i++), '\0')..., char()};
+      (void)c;
+    },
+    object,
+    std::make_index_sequence<member_count<Object>>{});
+}
+
+template<typename T>
+using index_seq_for = std::make_index_sequence<member_count<T>>;
+
+#ifdef __cpp_concepts
+
+
+template<typename T>
+concept reflectable = is_reflectable<T>;
+
+
+namespace details 
+{
+ template<std::size_t N>
   struct fixed_string {
     constexpr fixed_string(const char* const s) noexcept
     {
@@ -648,61 +725,18 @@ namespace details {
     }
     throw "Failed to find match name";
   }
-
-} // namespace details
-
-
-template<typename T>
-inline constexpr details::member_names_t<T> member_names{};
-
-template<std::size_t I, typename Object>
-[[nodiscard]] constexpr decltype(auto) get(Object& object) noexcept
-{
-  static_assert(reflectable<Object>);
-  return details::get<I>(lahzam::details::tie(object));
 }
+
 
 template<details::fixed_string S, typename Object>
 [[nodiscard]] constexpr decltype(auto) get(Object& object) noexcept
 {
-  static_assert(reflectable<Object>);
+  static_assert(is_reflectable<Object>);
   using O = std::remove_cvref_t<Object>;
   return details::get<details::name_to_index({S.str, S.str + S.size}, lahzam::member_names<O>[0].data(), lahzam::member_count<O>)>(
     lahzam::details::tie(object));
 }
-
-namespace details {
-  template<typename F, typename Object, std::size_t... Is>
-  constexpr decltype(auto) apply(F&& f, Object& object, std::index_sequence<Is...>)
-  {
-    auto t = details::tie(object);
-    return static_cast<F&&>(f)(details::get<Is>(t)...);
-  }
-
-} // namespace details
-
-template<typename F, typename Object>
-constexpr decltype(auto) apply(F&& f, Object& object)
-{
-  static_assert(reflectable<Object>);
-
-  return details::apply(static_cast<F&&>(f), object, std::make_index_sequence<member_count<Object>>{});
-}
-
-template<typename F, typename Object>
-constexpr void for_each_member(F f, Object& object)
-{
-  static_assert(reflectable<Object>);
-
-  return details::apply(
-    [&f](auto&... objects) {
-      const char c[] = {((void)f(objects), '\0')...,0};
-      (void)c;
-    },
-    object,
-    std::make_index_sequence<member_count<Object>>{});
-}
-
+#endif
 } // namespace lahzam
 
 #if defined(__clang__)

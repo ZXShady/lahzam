@@ -27,7 +27,7 @@ template<typename T, std::size_t... Is>
 int test(std::index_sequence<Is...>)
 {
   T  t{};
-  int c[] = {(lahzam::member_names<T>[Is], 0)...};
+  int c[] = {(void(lahzam::member_names<T>[Is]), 0)...};
   (void)c;
   return 0;
 }
