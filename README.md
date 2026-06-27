@@ -1,18 +1,18 @@
 # Lahzam
 
-Lahzam is a modern C++20 header-only library for fast and simple compile-time reflection of aggregate types.
+Lahzam is a modern C++17 header-only library for fast and simple compile-time reflection of aggregate types.
 
 API contains very simple functions
 
 1. `lahzam::tie(aggregate)` converts an aggregate to a `std::tuple<Members&...>` of references to apply algorithms on it.
-2. `lahzam::member_count<T>` gives the member count of aggregates or -1 on error
-3. `lahzam::member_names<T>` an object that iterates over all names of members.
+2. `lahzam::member_count<T>` gives the member count of aggregates or `size_t(-1)` on error
+3. `lahzam::member_names<T>` an object that iterates over all names of members. Requires C++20 atleast to work.
 4. `lahzam::get<I>(aggregate)` equalivent to `std::get<I>(lahzam::tie(aggregate))`
 5. `lahzam::get<"Name">(aggregate)` gives the member of the specific name.
 6. `lahzam::apply(f,aggregate)` similar to `std::tuple` apply. 
 7. `lahzam::for_each_member(f,aggregate)` similar to apply except the callable only takes a single arguement
 8. `lahzam::for_each_member_with_index(f,aggregate)` similar to `lahzam::for_each_member` except the callable takes the member and an index 
-9. `lahzam::for_each_member_with_name(f,aggregate)` similar to `lahzam::for_each_member` except the callable takes the member and its member name 
+9. `lahzam::for_each_member_with_name(f,aggregate)` similar to `lahzam::for_each_member` except the callable takes the member and its member name requires C++20 atleast to work
 
 Examples
 
